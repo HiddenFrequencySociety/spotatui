@@ -24,6 +24,41 @@ const MISSING_FRONTEND: &[u8] = b"This spotatui-gui was built without its fronte
 
 type Assets = &'static [(&'static str, &'static [u8])];
 
+// --- Fork: hosted mode -----------------------------------------------------
+// Upstream serves loopback only. The hosted fork can listen on a configured
+// address (SPOTATUI_BIND, e.g. 0.0.0.0:7860) for exactly one trusted browser:
+// the launch code in the URL is traded for the session token that guards the
+// websocket, exactly as on loopback. SPOTATUI_PUBLIC_HOST names the single
+// Host/Origin the page answers, and the optional SPOTATUI_HOSTED_CODE is a
+// static launch code (kept secret like a password) so restarts and a second
+// device do not need log access to re-enter.
+
+fn hosted_bind() -> Option<String> {
+  static BIND: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+  BIND
+    .get_or_init(|| {
+      std::env::var("SPOTATUI_BIND")
+        .ok()
+        .filter(|bind| !bind.starts_with("127.0.0.1") && !bind.starts_with("localhost") && bind.contains(':'))
+    })
+    .clone()
+}
+
+fn hosted_public_host() -> Option<String> {
+  static HOST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+  HOST
+    .get_or_init(|| std::env::var("SPOTATUI_PUBLIC_HOST").ok().filter(|host| !host.is_empty()))
+    .clone()
+}
+
+fn hosted_static_code() -> Option<String> {
+  static CODE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+  CODE
+    .get_or_init(|| std::env::var("SPOTATUI_HOSTED_CODE").ok().filter(|code| code.len() >= 16))
+    .clone()
+}
+// --- End fork: hosted mode -------------------------------------------------
+
 /// Every file in `gui/dist`, embedded by build.rs.
 pub(crate) static ASSETS: Assets = include!(concat!(env!("OUT_DIR"), "/gui_assets.rs"));
 
@@ -59,6 +94,13 @@ impl Access {
       return tokens_match(token, &self.token).then_some(Admission::Resumed);
     }
     let code = offered.strip_prefix(CODE_PROTOCOL)?;
+    // Fork: in hosted mode the static code admits like a fresh launch code, any
+    // number of times, so a restart or a new browser does not need log access.
+    if let Some(static_code) = hosted_static_code() {
+      if tokens_match(code, &static_code) {
+        return Some(Admission::Fresh);
+      }
+    }
     self
       .code
       .lock()
@@ -101,9 +143,16 @@ impl Head {
 
 /// Serves 127.0.0.1:0 until exit; the caller issues the launch code when it opens the browser.
 pub(crate) async fn spawn_listener(assets: Assets, link: Link) -> Result<(u16, Arc<Access>)> {
-  let listener = TcpListener::bind(("127.0.0.1", 0))
-    .await
-    .context("could not bind the GUI server on 127.0.0.1")?;
+  // Fork: SPOTATUI_BIND=0.0.0.0:7860 (or any non-loopback address) hosts the page.
+  let hosted = hosted_bind();
+  let listener = match &hosted {
+    Some(bind) => TcpListener::bind(bind.as_str())
+      .await
+      .with_context(|| format!("could not bind the GUI server on {bind}"))?,
+    None => TcpListener::bind(("127.0.0.1", 0))
+      .await
+      .context("could not bind the GUI server on 127.0.0.1")?,
+  };
   let port = listener.local_addr()?.port();
   let access = Arc::new(Access {
     code: Mutex::new(None),
@@ -125,15 +174,19 @@ pub(crate) async fn spawn_listener(assets: Assets, link: Link) -> Result<(u16, A
           continue;
         }
       };
-      if !peer.ip().is_loopback() {
-        log::warn!("GUI: refusing non-loopback connection from {peer}");
-        continue;
-      }
-      // Another local user can read the launch URL from the browser's command line.
-      #[cfg(target_os = "linux")]
-      if !same_user(peer.port(), port) {
-        log::warn!("GUI: refusing a loopback connection from another user");
-        continue;
+      // Fork: loopback peer checks guard the loopback server; hosted mode is
+      // guarded by the launch code / session token instead.
+      if hosted.is_none() {
+        if !peer.ip().is_loopback() {
+          log::warn!("GUI: refusing non-loopback connection from {peer}");
+          continue;
+        }
+        // Another local user can read the launch URL from the browser's command line.
+        #[cfg(target_os = "linux")]
+        if !same_user(peer.port(), port) {
+          log::warn!("GUI: refusing a loopback connection from another user");
+          continue;
+        }
       }
       let server = Arc::clone(&server);
       tokio::spawn(async move {
@@ -230,6 +283,19 @@ fn is_allowed(head: &Head, port: u16) -> bool {
   let Some(host) = head.host.as_deref() else {
     return false;
   };
+  // Fork: hosted mode answers exactly one configured public host (TLS ends at
+  // the platform proxy, so the Origin scheme arrives as https).
+  if let Some(public) = hosted_public_host() {
+    if host == public {
+      return match head.origin.as_deref() {
+        Some(origin) => origin == format!("https://{public}") || origin == format!("http://{public}"),
+        None => {
+          !head.upgrade
+            && matches!(head.fetch_site.as_deref(), None | Some("none" | "same-origin"))
+        }
+      };
+    }
+  }
   if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
     return false;
   }

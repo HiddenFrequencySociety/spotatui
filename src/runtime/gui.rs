@@ -71,6 +71,12 @@ async fn run(host: Option<GuiHost>) -> Result<()> {
 }
 
 fn launch_url(port: u16, code: &str) -> String {
+  // Fork: hosted mode serves one configured public host behind the platform's TLS.
+  if let Ok(public) = std::env::var("SPOTATUI_PUBLIC_HOST") {
+    if !public.is_empty() {
+      return format!("https://{public}/#code={code}");
+    }
+  }
   format!("http://127.0.0.1:{port}/#code={code}")
 }
 
@@ -100,8 +106,14 @@ async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
   let (link, publisher, inbox) = bridge::channel(apps, Arc::clone(&onboarding), window.is_some());
   let (port, access) = server::spawn_listener(server::ASSETS, link).await?;
   let url = launch_url(port, &access.issue(Instant::now())?);
+  // Fork: a hosted server has no local browser to open; always print the URL.
+  let hosted = std::env::var("SPOTATUI_PUBLIC_HOST").is_ok_and(|host| !host.is_empty());
   match show {
     Some(show) => show(&url)?,
+    None if hosted => {
+      log::info!("GUI: hosted, open {url}");
+      eprintln!("Open {url} in a browser");
+    }
     None => {
       if let Err(e) = open::that_detached(&url) {
         log::warn!("could not open the browser: {e}");
