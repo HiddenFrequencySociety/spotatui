@@ -54,7 +54,7 @@ fn hosted_public_host() -> Option<String> {
 fn hosted_static_code() -> Option<String> {
   static CODE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
   CODE
-    .get_or_init(|| std::env::var("SPOTATUI_HOSTED_CODE").ok().filter(|code| code.len() >= 16))
+    .get_or_init(|| std::env::var("SPOTATUI_HOSTED_CODE").ok().filter(|code| !code.is_empty()))
     .clone()
 }
 // --- End fork: hosted mode -------------------------------------------------

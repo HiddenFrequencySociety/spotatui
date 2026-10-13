@@ -101,7 +101,14 @@ async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
     log::warn!("[state] failed to migrate legacy app data files: {e}");
   }
   // The page answers the first-launch questions, so it must be up before boot asks them.
-  let onboarding = Arc::new(BrowserOnboarding::new());
+  let onboarding = {
+    let mut bridge = BrowserOnboarding::new();
+    // Fork: hosted mode - wait as long as it takes the first page to arrive.
+    if std::env::var_os("SPOTATUI_HOSTED_CODE").is_some() {
+      bridge.hosted_grace();
+    }
+    Arc::new(bridge)
+  };
   let (boot_done, apps) = tokio::sync::watch::channel(None);
   let (link, publisher, inbox) = bridge::channel(apps, Arc::clone(&onboarding), window.is_some());
   let (port, access) = server::spawn_listener(server::ASSETS, link).await?;

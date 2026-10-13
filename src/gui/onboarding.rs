@@ -103,6 +103,12 @@ impl BrowserOnboarding {
     }
   }
 
+  // Fork: hosted mode - on a fresh deploy no page may arrive for hours, and a
+  // dead process cannot be onboarded. The grace is a week instead of a minute.
+  pub(crate) fn hosted_grace(&mut self) {
+    self.no_page_grace = Duration::from_secs(7 * 24 * 3600);
+  }
+
   pub(crate) fn subscribe(&self) -> watch::Receiver<OnboardingView> {
     self.view.subscribe()
   }
