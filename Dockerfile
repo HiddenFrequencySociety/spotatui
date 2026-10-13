@@ -1,6 +1,6 @@
 # Hosted-mode image for the spotatui fork (branch: hosted).
 # Stage 1: build the web frontend.
-FROM node:22-slim AS gui
+FROM node:22-bookworm-slim AS gui
 WORKDIR /app/gui
 COPY gui/package.json gui/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -8,7 +8,7 @@ COPY gui/ ./
 RUN npm run build
 
 # Stage 2: build the Rust backend with the gui frontend embedded.
-FROM rust:slim AS build
+FROM rust:slim-bookworm AS build
 RUN apt-get update \
   && apt-get install -y --no-install-recommends pkg-config libssl-dev libasound2-dev perl make \
   && rm -rf /var/lib/apt/lists/*
