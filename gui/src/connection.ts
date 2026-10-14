@@ -48,6 +48,15 @@ export function takeLaunchCode(
   return code;
 }
 
+/** Fork: a code with characters a WebSocket subprotocol cannot carry travels hex-encoded. */
+export function codeProtocol(code: string): string {
+  if (/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(code)) return `spotatui.code.${code}`;
+  const hex = Array.from(new TextEncoder().encode(code), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+  return `spotatui.codehex.${hex}`;
+}
+
 /** Whether the page shows the first-launch questions: a question is open, or the app has not booted. */
 export function showsOnboarding(state: State): boolean {
   return (
@@ -92,7 +101,7 @@ export class Connection {
   start(): void {
     const token = this.storage.getItem(TOKEN_KEY);
     const protocol = this.code
-      ? `spotatui.code.${this.code}`
+      ? codeProtocol(this.code)
       : token
         ? `spotatui.token.${token}`
         : null;

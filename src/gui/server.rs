@@ -18,6 +18,19 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const LAUNCH_CODE_TTL: Duration = Duration::from_secs(60);
 const CODE_PROTOCOL: &str = "spotatui.code.";
 const TOKEN_PROTOCOL: &str = "spotatui.token.";
+// Fork: a code with characters a WebSocket subprotocol cannot carry travels hex-encoded.
+const CODE_HEX_PROTOCOL: &str = "spotatui.codehex.";
+
+fn decode_hex_code(hex: &str) -> Option<String> {
+  if hex.is_empty() || hex.len() % 2 != 0 || !hex.is_ascii() {
+    return None;
+  }
+  let bytes: Option<Vec<u8>> = (0..hex.len())
+    .step_by(2)
+    .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+    .collect();
+  String::from_utf8(bytes?).ok()
+}
 const PROTOCOL_HEADER: &str = "Sec-WebSocket-Protocol";
 const TEXT: &str = "text/plain; charset=utf-8";
 const MISSING_FRONTEND: &[u8] = b"This spotatui-gui was built without its frontend. Run `npm ci` and `npm run build` in gui/, then rebuild spotatui-gui.\n";
@@ -93,7 +106,13 @@ impl Access {
     if let Some(token) = offered.strip_prefix(TOKEN_PROTOCOL) {
       return tokens_match(token, &self.token).then_some(Admission::Resumed);
     }
-    let code = offered.strip_prefix(CODE_PROTOCOL)?;
+    let decoded;
+    let code = if let Some(hex) = offered.strip_prefix(CODE_HEX_PROTOCOL) {
+      decoded = decode_hex_code(hex)?;
+      decoded.as_str()
+    } else {
+      offered.strip_prefix(CODE_PROTOCOL)?
+    };
     // Fork: in hosted mode the static code admits like a fresh launch code, any
     // number of times, so a restart or a new browser does not need log access.
     if let Some(static_code) = hosted_static_code() {
