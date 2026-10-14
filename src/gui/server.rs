@@ -375,8 +375,12 @@ async fn respond(
   content_type: &str,
   body: &[u8],
 ) -> Result<()> {
+  // Fork: hosted mode is served over https, so the page must be allowed to open wss to its own host.
+  let hosted_ws = hosted_public_host()
+    .map(|host| format!(" wss://{host}"))
+    .unwrap_or_default();
   let head = format!(
-    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'self'; img-src 'self' https: http:; connect-src ws://127.0.0.1:{port} ws://localhost:{port}; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
+    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'self'; img-src 'self' https: http:; connect-src ws://127.0.0.1:{port} ws://localhost:{port}{hosted_ws}; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
     body.len()
   );
   stream.write_all(head.as_bytes()).await?;

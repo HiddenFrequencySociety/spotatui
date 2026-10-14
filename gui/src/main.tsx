@@ -13,7 +13,10 @@ import "./style.css";
 const connection = new Connection(
   takeLaunchCode(window.location, window.history),
   (protocol, handlers) => {
-    const socket = new WebSocket(`ws://${window.location.host}/ws`, protocol);
+    const socket = new WebSocket(
+      `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`,
+      protocol,
+    );
     socket.onmessage = (event) => handlers.message(String(event.data));
     socket.onclose = () => handlers.close();
     return socket;
